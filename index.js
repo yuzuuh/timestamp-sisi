@@ -148,6 +148,28 @@ app.get('/api/shorturl/:id', (req, res) => {
   return res.redirect(original);
 });
 
+// File Metadata Microservice - agrega esto a tu index.js
+const multer = require('multer');
+
+// usar memoria (no guardamos archivos en disco)
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
+
+// Endpoint esperado por FCC: POST /api/fileanalyse
+app.post('/api/fileanalyse', upload.single('upfile'), (req, res) => {
+  // req.file viene de multer
+  if (!req.file) {
+    return res.status(400).json({ error: 'no file uploaded' });
+  }
+
+  const file = req.file;
+  res.json({
+    name: file.originalname,
+    type: file.mimetype,
+    size: file.size
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`All microservices running on port ${PORT}`);
