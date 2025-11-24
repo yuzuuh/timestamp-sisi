@@ -1,32 +1,65 @@
-// index.js
-// where your node app starts
+'use strict';
 
-// init project
-var express = require('express');
-var app = express();
+const express = require('express');
+const cors = require('cors');
 
-// enable CORS (https://en.wikipedia.org/wiki/Cross-origin_resource_sharing)
-// so that your API is remotely testable by FCC 
-var cors = require('cors');
-app.use(cors({optionsSuccessStatus: 200}));  // some legacy browsers choke on 204
+const app = express();
 
-// http://expressjs.com/en/starter/static-files.html
+// Allow cross-origin requests (FreeCodeCamp requiere esto para probar)
+app.use(cors());
+
+// Servir carpeta public si querís una UI (index.html), opcional
 app.use(express.static('public'));
 
-// http://expressjs.com/en/starter/basic-routing.html
-app.get("/", function (req, res) {
-  res.sendFile(__dirname + '/views/index.html');
+// Endpoint base (opcional: puede devolver un README o html)
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/index.html'); // crea public/index.html si querís
 });
 
+// Helper: crea el objeto de respuesta dado un Date válido
+function buildTimeResponse(d) {
+  return {
+    unix: d.getTime(),
+    utc: d.toUTCString()
+  };
+}
 
-// your first API endpoint... 
-app.get("/api/hello", function (req, res) {
-  res.json({greeting: 'hello API'});
+// Endpoint principal: devuelve fecha actual
+app.get('/api', (req, res) => {
+  const now = new Date();
+  res.json(buildTimeResponse(now));
 });
 
+// Endpoint con parámetro
+app.get('/api/:date', (req, res) => {
+  const { date } = req.params;
 
+  // Si la entrada es solo dígitos, puede ser unix en segundos o milisegundos.
+  // Detectamos por longitud: 13 dígitos => ms. 10 dígitos (o menos) => segundos.
+  let dateObj;
+  if (/^\d+$/.test(date)) {
+    // dígitos puros
+    if (date.length === 13) {
+      // ya está en ms
+      dateObj = new Date(Number(date));
+    } else {
+      // asumimos segundos u otro -> convertir a ms
+      dateObj = new Date(Number(date) * 1000);
+    }
+  } else {
+    // intenta parsear string de fecha (ej: "2015-12-25")
+    dateObj = new Date(date);
+  }
 
-// Listen on port set in environment variable or default to 3000
-var listener = app.listen(process.env.PORT || 3000, function () {
-  console.log('Your app is listening on port ' + listener.address().port);
+  if (dateObj.toString() === 'Invalid Date') {
+    return res.json({ error: 'Invalid Date' });
+  }
+
+  return res.json(buildTimeResponse(dateObj));
+});
+
+// Puerto (soporta env var PORT para deploys)
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Timestamp microservice running on port ${PORT}`);
 });
