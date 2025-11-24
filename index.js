@@ -2,28 +2,29 @@
 
 const express = require('express');
 const cors = require('cors');
+const dns = require('dns');
+const { URL } = require('url');
 
 const app = express();
 
-// Si tu app está detrás de un proxy (Render, Heroku, etc.) para obtener IP real:
+// Si la app está detrás de proxy (Render, Heroku)
 app.set('trust proxy', true);
 
-// Allow cross-origin requests (FreeCodeCamp requiere esto para probar)
+// middlewares
 app.use(cors());
+app.use(express.urlencoded({ extended: false })); // importante para manejar form POST (body parser)
+app.use(express.json());
 
-// Endpoint base
+// Ruta base (usa views/index.html si lo tenés)
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html');
 });
 
-// ----- Request Header Parser Microservice -----
-// Endpoint que devuelve ipaddress, language y software
+// ----------------- Request Header Parser -----------------
 app.get('/api/whoami', (req, res) => {
-  // IP: preferimos x-forwarded-for (puede contener lista), si no -> req.ip
   const xff = req.headers['x-forwarded-for'] || req.headers['X-Forwarded-For'];
   let ipaddress = '';
   if (xff) {
-    // x-forwarded-for: "client, proxy1, proxy2"
     ipaddress = String(xff).split(',')[0].trim();
   } else if (req.ip) {
     ipaddress = req.ip;
@@ -31,44 +32,36 @@ app.get('/api/whoami', (req, res) => {
     ipaddress = req.connection && req.connection.remoteAddress ? req.connection.remoteAddress : '';
   }
 
-  // Language: primer valor del header accept-language
   const acceptLang = req.headers['accept-language'] || '';
-  const language = acceptLang.split(',')[0];
+  const language = acceptLang.split(',')[0] || '';
 
-  // Software: el user-agent completo (o podés extraer la sección entre paréntesis)
   const userAgent = req.headers['user-agent'] || '';
-  // Opcional: extraer texto entre paréntesis si existe, para que quede más corto
   const match = userAgent.match(/\(([^)]+)\)/);
   const software = match ? match[1] : userAgent;
 
-  res.json({
-    ipaddress,
-    language,
-    software
-  });
+  res.json({ ipaddress, language, software });
 });
-// -----------------------------------------------
+// ---------------------------------------------------------
 
-// Helper: crea el objeto de respuesta dado un Date válido
+// ----------------- Timestamp Microservice ----------------
 function buildTimeResponse(d) {
-  return {
-    unix: d.getTime(),
-    utc: d.toUTCString()
-  };
+  return { unix: d.getTime(), utc: d.toUTCString() };
 }
 
-// Endpoint principal: devuelve fecha actual
+
 app.get('/api', (req, res) => {
-  const now = new Date();
-  res.json(buildTimeResponse(now));
+  res.json(buildTimeResponse(new Date()));
 });
 
-// Endpoint con parámetro (timestamp)
-app.get('/api/:date', (req, res) => {
-  const { date } = req.params;
 
+app.get('/api/:date', (req, res) => {
+ 
+ const { date } = req.params;
   let dateObj;
+
+
   if (/^\d+$/.test(date)) {
+    // dígitos puros: tratar como timestamp (ms o s)
     if (date.length === 13) {
       dateObj = new Date(Number(date));
     } else {
@@ -84,9 +77,78 @@ app.get('/api/:date', (req, res) => {
 
   return res.json(buildTimeResponse(dateObj));
 });
+// ---------------------------------------------------------
 
-// Puerto
+// ----------------- URL Shortener Microservice -------------
+/*
+ POST /api/shorturl
+   - body: url=<original_url>
+   - validates url format and dns.lookup(hostname)
+   - response on success: { original_url, short_url }
+   - response on invalid: { error: 'invalid url' }
+
+ GET /api/shorturl/:short_url
+   - redirects to original url if exists
+   - otherwise returns { error: 'No short URL found for the given input' }
+*/
+
+// almacenamiento en memoria (para FCC es suficiente)
+const urlToId = {};
+const idToUrl = {};
+let nextId = 1;
+
+app.post('/api/shorturl', (req, res) => {
+  const originalUrl = req.body.url;
+
+  if (!originalUrl) {
+    return res.json({ error: 'invalid url' });
+  }
+
+  if (!/^https?:\/\//i.test(originalUrl)) {
+    return res.json({ error: 'invalid url' });
+  }
+
+  let hostname;
+  try {
+    const parsed = new URL(originalUrl);
+    hostname = parsed.hostname;
+  } catch (e) {
+    return res.json({ error: 'invalid url' });
+  }
+
+  dns.lookup(hostname, (err/*, address, family*/) => {
+    if (err) {
+      // dns no resolvió -> url inválida
+      return res.json({ error: 'invalid url' });
+    }
+
+    if (urlToId[originalUrl]) {
+      return res.json({ original_url: originalUrl, short_url: urlToId[originalUrl] });
+    }
+
+    const id = nextId++;
+    urlToId[originalUrl] = id;
+    idToUrl[id] = originalUrl;
+
+    return res.json({ original_url: originalUrl, short_url: id });
+  });
+});
+
+app.get('/api/shorturl/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    return res.json({ error: 'No short URL found for the given input' });
+  }
+
+  const original = idToUrl[id];
+  if (!original) {
+    return res.json({ error: 'No short URL found for the given input' });
+  }
+
+  return res.redirect(original);
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Timestamp + Header microservices running on port ${PORT}`);
+  console.log(`All microservices running on port ${PORT}`);
 });
